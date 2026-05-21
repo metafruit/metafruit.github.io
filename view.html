@@ -160,6 +160,10 @@
       const totalPaid   = payments.reduce((s, p) => s + p.amount, 0);
       const balance     = totalEarned - totalPaid;
 
+      console.log('Trips (first 3):', trips.slice(0,3));
+      console.log('Payments:', payments);
+      console.log('totalEarned:', totalEarned, '| totalPaid:', totalPaid, '| balance:', balance);
+      
       renderLedger(totalEarned, totalPaid, balance);
       renderPayments(payments);
       renderTrips(trips);
