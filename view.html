@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trip Log</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --blue: #1a73e8; --blue-dark: #1557b0;
+      --green: #34a853; --red: #d93025;
+      --text: #202124; --muted: #5f6368;
+      --border: #e0e0e0; --bg: #f8f9fa;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); }
+
+    .header { background: var(--blue); color: white; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 4px rgba(0,0,0,.2); }
+    .header h1 { font-size: 1.1rem; font-weight: 600; }
+    .badge { background: rgba(255,255,255,.25); padding: 4px 10px; border-radius: 100px; font-size: .72rem; font-weight: 700; letter-spacing: .08em; }
+
+    .content { padding: 16px 16px 60px; max-width: 600px; margin: 0 auto; }
+    .section-title { font-size: .78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 20px 0 10px; }
+    .section-title:first-child { margin-top: 0; }
+
+    .ledger-card { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .ledger-row { display: flex; justify-content: space-between; font-size: .9rem; color: var(--muted); padding: 3px 0; }
+    .ledger-divider { border: none; border-top: 2px solid var(--border); margin: 10px 0; }
+    .ledger-balance-row { display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 700; }
+    .bal-owed { color: var(--red); }
+    .bal-clear { color: var(--green); }
+    .bal-credit { color: var(--blue); }
+
+    .pay-item { background: white; border-radius: 10px; padding: 11px 14px; margin-bottom: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.06); display: flex; align-items: center; justify-content: space-between; }
+    .pay-item-date { font-size: .88rem; font-weight: 600; }
+    .pay-item-notes { font-size: .82rem; color: var(--muted); margin-top: 1px; }
+    .pay-item-amount { font-size: 1rem; font-weight: 700; color: var(--green); }
+
+    .date-group { margin-bottom: 16px; }
+    .date-hdr { font-size: .88rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 0 2px 8px; display: flex; justify-content: space-between; }
+    .date-hdr-total { color: var(--blue); }
+    .trip-card { background: white; border-radius: 12px; padding: 14px 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .trip-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+    .trip-time { font-size: 1rem; font-weight: 600; }
+    .trip-notes { font-size: .88rem; color: var(--muted); margin-top: 3px; }
+    .trip-total { font-size: 1.15rem; font-weight: 700; color: var(--blue); white-space: nowrap; }
+    .breakdown { border-top: 1px solid var(--border); padding-top: 8px; }
+    .brow { display: flex; justify-content: space-between; font-size: .82rem; padding: 2px 0; }
+    .brow.base { color: var(--muted); }
+    .brow.extra { color: var(--text); }
+
+    .empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: .9rem; }
+    .error { text-align: center; padding: 20px; color: var(--red); font-size: .88rem; }
+    .last-updated { text-align: center; font-size: .75rem; color: #bbb; padding-top: 16px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Trip Log</h1>
+  <span class="badge">VIEW ONLY</span>
+</div>
+
+<div class="content">
+  <div class="section-title">Balance</div>
+  <div class="ledger-card" id="ledgerCard"><div class="empty">Loading…</div></div>
+
+  <div id="paymentsSection" style="display:none">
+    <div class="section-title">Payments</div>
+    <div id="paymentsList"></div>
+  </div>
+
+  <div class="section-title">Trip History</div>
+  <div id="tripsList"><div class="empty">Loading…</div></div>
+
+  <div class="last-updated" id="lastUpdated"></div>
+</div>
+
+<script>
+  // ── FILL THESE IN ──────────────────────────────────────
+  const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID';
+  const TRIPS_GID      = '0';           // gid from URL when on Trips tab
+  const CHARGES_GID    = '000000000';   // gid from URL when on Charges tab
+  const PAYMENTS_GID   = '000000000';   // gid from URL when on Payments tab
+  // ──────────────────────────────────────────────────────
+
+  function csvUrl(gid) {
+    return `https://docs.google.com/spreadsheets/d/${17gVNLa7SkliMsy57-rakpvjq0AlMQmM7A0HGSy8oQF4}/export?format=csv&gid=${gid}`;
+  }
+
+  function $(id) { return document.getElementById(id); }
+  function money(n) { return '$' + Number(n).toFixed(2); }
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function parseMoney(s) {
+    return parseFloat(String(s).replace(/[$,]/g, '')) || 0;
+  }
+
+  function parseCSV(text) {
+    const lines = text.trim().split('\n');
+    return lines.slice(1).map(line => {
+      const values = [];
+      let cur = '', inQ = false;
+      for (const ch of line) {
+        if (ch === '"') { inQ = !inQ; }
+        else if (ch === ',' && !inQ) { values.push(cur.trim()); cur = ''; }
+        else { cur += ch; }
+      }
+      values.push(cur.trim());
+      return values;
+    }).filter(r => r[0]);
+  }
+
+  function fmtDateTime(date, time) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const [m, d] = (date || '').split('/');
+    const month = months[parseInt(m) - 1] || '';
+    const day = parseInt(d) || '';
+    return (month && day ? month + ' ' + day + ' · ' : '') + (time || '');
+  }
+
+  function fmtDate(date) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const [m, d, y] = (date || '').split('/');
+    const month = months[parseInt(m) - 1] || '';
+    const day = parseInt(d) || '';
+    return month && day ? `${month} ${day}, ${y}` : (date || '');
+  }
+
+  async function loadAll() {
+    try {
+      const [tripsText, chargesText, paymentsText] = await Promise.all([
+        fetch(csvUrl(542146659)).then(r => r.text()),
+        fetch(csvUrl(714777173)).then(r => r.text()),
+        fetch(csvUrl(1469726031)).then(r => r.text())
+      ]);
+
+      // Columns: ID, Date, Time, Notes, Base Fare, Extra Total, Grand Total, Created At
+      const trips = parseCSV(tripsText).reverse().map(r => ({
+        id: r[0], date: r[1], time: r[2], notes: r[3],
+        baseFare: parseMoney(r[4]),
+        grandTotal: parseMoney(r[6])
+      }));
+
+      // Columns: Trip ID, Description, Amount, Created At
+      const chargesMap = {};
+      parseCSV(chargesText).forEach(r => {
+        if (!chargesMap[r[0]]) chargesMap[r[0]] = [];
+        chargesMap[r[0]].push({ description: r[1], amount: parseMoney(r[2]) });
+      });
+      trips.forEach(t => { t.charges = chargesMap[t.id] || []; });
+
+      // Columns: ID, Date, Notes, Amount, Created At
+      const payments = parseCSV(paymentsText).reverse().map(r => ({
+        date: r[1], notes: r[2], amount: parseMoney(r[3])
+      }));
+
+      const totalEarned = trips.reduce((s, t) => s + t.grandTotal, 0);
+      const totalPaid   = payments.reduce((s, p) => s + p.amount, 0);
+      const balance     = totalEarned - totalPaid;
+
+      renderLedger(totalEarned, totalPaid, balance);
+      renderPayments(payments);
+      renderTrips(trips);
+      $('lastUpdated').textContent = 'Last updated ' + new Date().toLocaleTimeString();
+
+    } catch (err) {
+      $('tripsList').innerHTML = '<div class="error">Could not load data. Make sure the sheet is shared publicly.</div>';
+      console.error(err);
+    }
+  }
+
+  function renderLedger(earned, paid, balance) {
+    const isOwed   = balance >  0.005;
+    const isCredit = balance < -0.005;
+    const cls  = isOwed ? 'bal-owed' : isCredit ? 'bal-credit' : 'bal-clear';
+    const label = isCredit ? 'Credit' : 'Balance Owed';
+    const text  = isCredit ? money(Math.abs(balance)) + ' credit' : !isOwed ? 'Paid up!' : money(balance);
+    $('ledgerCard').innerHTML = `
+      <div class="ledger-row"><span>Total Earned</span><span>${money(earned)}</span></div>
+      <div class="ledger-row"><span>Total Paid</span><span>${money(paid)}</span></div>
+      <hr class="ledger-divider">
+      <div class="ledger-balance-row"><span>${label}</span><span class="${cls}">${text}</span></div>`;
+  }
+
+  function renderPayments(payments) {
+    const sec = $('paymentsSection');
+    if (!payments.length) { sec.style.display = 'none'; return; }
+    sec.style.display = 'block';
+    $('paymentsList').innerHTML = payments.map(p => `
+      <div class="pay-item">
+        <div>
+          <div class="pay-item-date">${esc(fmtDate(p.date))}</div>
+          ${p.notes ? '<div class="pay-item-notes">' + esc(p.notes) + '</div>' : ''}
+        </div>
+        <div class="pay-item-amount">${money(p.amount)}</div>
+      </div>`).join('');
+  }
+
+  function renderTrips(trips) {
+    if (!trips.length) { $('tripsList').innerHTML = '<div class="empty">No trips yet.</div>'; return; }
+    const byDate = {};
+    trips.forEach(t => (byDate[t.date || ''] = byDate[t.date || ''] || []).push(t));
+    let html = '';
+    for (const [date, ts] of Object.entries(byDate)) {
+      const dayTotal = ts.reduce((s, t) => s + t.grandTotal, 0);
+      html += `<div class="date-group"><div class="date-hdr"><span>${esc(date)}</span><span class="date-hdr-total">${money(dayTotal)}</span></div>`;
+      ts.forEach(t => {
+        let bdown = `<div class="breakdown"><div class="brow base"><span>Base fare</span><span>${money(t.baseFare)}</span></div>`;
+        t.charges.forEach(c => {
+          bdown += `<div class="brow extra"><span>${esc(c.description)}</span><span>${money(c.amount)}</span></div>`;
+        });
+        bdown += '</div>';
+        html += `<div class="trip-card">
+          <div class="trip-top">
+            <div>
+              <div class="trip-time">${esc(fmtDateTime(t.date, t.time))}</div>
+              ${t.notes ? '<div class="trip-notes">' + esc(t.notes) + '</div>' : ''}
+            </div>
+            <div class="trip-total">${money(t.grandTotal)}</div>
+          </div>${bdown}</div>`;
+      });
+      html += '</div>';
+    }
+    $('tripsList').innerHTML = html;
+  }
+
+  loadAll();
+  setInterval(loadAll, 60000);
+</script>
+</body>
+</html>
