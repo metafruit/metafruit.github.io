@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>Trip Log</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -49,7 +49,7 @@
     .brow.extra { color: var(--text); }
 
     .empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: .9rem; }
-    .error { text-align: center; padding: 20px; color: var(--red); font-size: .88rem; }
+    .error { background: white; border-radius: 10px; padding: 16px; color: var(--red); font-size: .88rem; line-height: 1.5; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
     .last-updated { text-align: center; font-size: .75rem; color: #bbb; padding-top: 16px; }
   </style>
 </head>
@@ -61,8 +61,11 @@
 </div>
 
 <div class="content">
+
   <div class="section-title">Balance</div>
-  <div class="ledger-card" id="ledgerCard"><div class="empty">Loading…</div></div>
+  <div class="ledger-card" id="ledgerCard">
+    <div class="empty">Loading…</div>
+  </div>
 
   <div id="paymentsSection" style="display:none">
     <div class="section-title">Payments</div>
@@ -70,21 +73,25 @@
   </div>
 
   <div class="section-title">Trip History</div>
-  <div id="tripsList"><div class="empty">Loading…</div></div>
+  <div id="tripsList">
+    <div class="empty">Loading…</div>
+  </div>
 
   <div class="last-updated" id="lastUpdated"></div>
+
 </div>
 
 <script>
-  // ── FILL THESE IN ──────────────────────────────────────
+  // ── FILL THIS IN ───────────────────────────────────────
   const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID';
-  const TRIPS_GID      = '0';           // gid from URL when on Trips tab
-  const CHARGES_GID    = '000000000';   // gid from URL when on Charges tab
-  const PAYMENTS_GID   = '000000000';   // gid from URL when on Payments tab
   // ──────────────────────────────────────────────────────
 
-  function csvUrl(gid) {
-    return `https://docs.google.com/spreadsheets/d/${17gVNLa7SkliMsy57-rakpvjq0AlMQmM7A0HGSy8oQF4}/export?format=csv&gid=${gid}`;
+  const TRIPS_SHEET    = 'Trips';
+  const CHARGES_SHEET  = 'Charges';
+  const PAYMENTS_SHEET = 'Payments';
+
+  function csvUrl(sheetName) {
+    return `https://docs.google.com/spreadsheets/d/$17gVNLa7SkliMsy57-rakpvjq0AlMQmM7A0HGSy8oQF4/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
   }
 
   function $(id) { return document.getElementById(id); }
@@ -131,19 +138,23 @@
   async function loadAll() {
     try {
       const [tripsText, chargesText, paymentsText] = await Promise.all([
-        fetch(csvUrl(542146659)).then(r => r.text()),
-        fetch(csvUrl(714777173)).then(r => r.text()),
-        fetch(csvUrl(1469726031)).then(r => r.text())
+        fetch(csvUrl(TRIPS_SHEET)).then(r => r.text()),
+        fetch(csvUrl(CHARGES_SHEET)).then(r => r.text()),
+        fetch(csvUrl(PAYMENTS_SHEET)).then(r => r.text())
       ]);
 
-      // Columns: ID, Date, Time, Notes, Base Fare, Extra Total, Grand Total, Created At
+      // Trips — columns: ID, Date, Time, Notes, Base Fare, Extra Total, Grand Total, Created At
       const trips = parseCSV(tripsText).reverse().map(r => ({
-        id: r[0], date: r[1], time: r[2], notes: r[3],
-        baseFare: parseMoney(r[4]),
-        grandTotal: parseMoney(r[6])
+        id:         r[0],
+        date:       r[1],
+        time:       r[2],
+        notes:      r[3],
+        baseFare:   parseMoney(r[4]),
+        grandTotal: parseMoney(r[6]),
+        charges:    []
       }));
 
-      // Columns: Trip ID, Description, Amount, Created At
+      // Charges — columns: Trip ID, Description, Amount, Created At
       const chargesMap = {};
       parseCSV(chargesText).forEach(r => {
         if (!chargesMap[r[0]]) chargesMap[r[0]] = [];
@@ -151,9 +162,11 @@
       });
       trips.forEach(t => { t.charges = chargesMap[t.id] || []; });
 
-      // Columns: ID, Date, Notes, Amount, Created At
+      // Payments — columns: ID, Date, Notes, Amount, Created At
       const payments = parseCSV(paymentsText).reverse().map(r => ({
-        date: r[1], notes: r[2], amount: parseMoney(r[3])
+        date:   r[1],
+        notes:  r[2],
+        amount: parseMoney(r[3])
       }));
 
       const totalEarned = trips.reduce((s, t) => s + t.grandTotal, 0);
@@ -166,7 +179,13 @@
       $('lastUpdated').textContent = 'Last updated ' + new Date().toLocaleTimeString();
 
     } catch (err) {
-      $('tripsList').innerHTML = '<div class="error">Could not load data. Make sure the sheet is shared publicly.</div>';
+      $('ledgerCard').innerHTML = `<div class="error">
+        Could not load data.<br>
+        Make sure the spreadsheet is shared as <strong>"Anyone with the link → Viewer"</strong>
+        and the Spreadsheet ID is correct.<br><br>
+        Error: ${esc(err.message)}
+      </div>`;
+      $('tripsList').innerHTML = '';
       console.error(err);
     }
   }
@@ -174,14 +193,19 @@
   function renderLedger(earned, paid, balance) {
     const isOwed   = balance >  0.005;
     const isCredit = balance < -0.005;
-    const cls  = isOwed ? 'bal-owed' : isCredit ? 'bal-credit' : 'bal-clear';
+    const cls   = isOwed ? 'bal-owed' : isCredit ? 'bal-credit' : 'bal-clear';
     const label = isCredit ? 'Credit' : 'Balance Owed';
-    const text  = isCredit ? money(Math.abs(balance)) + ' credit' : !isOwed ? 'Paid up!' : money(balance);
+    const text  = isCredit ? money(Math.abs(balance)) + ' credit'
+                : !isOwed  ? 'Paid up!'
+                : money(balance);
     $('ledgerCard').innerHTML = `
       <div class="ledger-row"><span>Total Earned</span><span>${money(earned)}</span></div>
       <div class="ledger-row"><span>Total Paid</span><span>${money(paid)}</span></div>
       <hr class="ledger-divider">
-      <div class="ledger-balance-row"><span>${label}</span><span class="${cls}">${text}</span></div>`;
+      <div class="ledger-balance-row">
+        <span>${label}</span>
+        <span class="${cls}">${text}</span>
+      </div>`;
   }
 
   function renderPayments(payments) {
@@ -199,15 +223,24 @@
   }
 
   function renderTrips(trips) {
-    if (!trips.length) { $('tripsList').innerHTML = '<div class="empty">No trips yet.</div>'; return; }
+    if (!trips.length) {
+      $('tripsList').innerHTML = '<div class="empty">No trips logged yet.</div>';
+      return;
+    }
     const byDate = {};
     trips.forEach(t => (byDate[t.date || ''] = byDate[t.date || ''] || []).push(t));
+
     let html = '';
     for (const [date, ts] of Object.entries(byDate)) {
       const dayTotal = ts.reduce((s, t) => s + t.grandTotal, 0);
-      html += `<div class="date-group"><div class="date-hdr"><span>${esc(date)}</span><span class="date-hdr-total">${money(dayTotal)}</span></div>`;
+      html += `<div class="date-group">
+        <div class="date-hdr">
+          <span>${esc(date)}</span>
+          <span class="date-hdr-total">${money(dayTotal)}</span>
+        </div>`;
       ts.forEach(t => {
-        let bdown = `<div class="breakdown"><div class="brow base"><span>Base fare</span><span>${money(t.baseFare)}</span></div>`;
+        let bdown = `<div class="breakdown">
+          <div class="brow base"><span>Base fare</span><span>${money(t.baseFare)}</span></div>`;
         t.charges.forEach(c => {
           bdown += `<div class="brow extra"><span>${esc(c.description)}</span><span>${money(c.amount)}</span></div>`;
         });
@@ -219,7 +252,9 @@
               ${t.notes ? '<div class="trip-notes">' + esc(t.notes) + '</div>' : ''}
             </div>
             <div class="trip-total">${money(t.grandTotal)}</div>
-          </div>${bdown}</div>`;
+          </div>
+          ${bdown}
+        </div>`;
       });
       html += '</div>';
     }
